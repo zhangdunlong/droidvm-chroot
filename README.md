@@ -575,16 +575,26 @@ module/
 
 ### 配置（`/data/adb/droidvm.env`）
 
+刷入时 `customize.sh` 会自动生成一份。完整带注释的模板见
+[`configs/droidvm.env.example`](./configs/droidvm.env.example)，也可以直接拷过去改：
+
 ```bash
-A2A_USER=admin
-A2A_PASS='<AI 网关管理员密码>'          # 留空则跳过该服务
-CF_API_TOKEN='<Cloudflare Token>'       # 证书 DNS-01 用，仅需 Zone.DNS.Edit
-HTTPS_PROXY='http://127.0.0.1:7890'     # 出站 443 被拦时填
-DASH_LINKS='青龙面板|https://ql.example.com|http://{ip4}:5700'
-DASH_DEVICE_NAME='Android Phone'
+su -c 'cp configs/droidvm.env.example /data/adb/droidvm.env'
+su -c 'chmod 600 /data/adb/droidvm.env'
+su -c 'vi /data/adb/droidvm.env'
+su -c 'sh /data/adb/modules/DroidVM-Chroot/bin/mgmt.sh restart'
 ```
 
-改完执行 `mgmt.sh restart`。
+| 键 | 作用 | 留空时 |
+|---|---|---|
+| `A2A_USER` / `A2A_PASS` | AI 网关管理端凭据 | 跳过 agent2api，不启动 |
+| `CF_API_TOKEN` | 证书 DNS-01，仅需 Zone.DNS.Edit | 无 HTTPS 证书 |
+| `HTTPS_PROXY` | Caddy 出站代理（证书申请被拦时填） | 直连 |
+| `DASH_LINKS` | 面板快捷入口，`名称\|公网URL\|内网URL` | 卡片隐藏 |
+| `DASH_DEVICE_NAME` | 面板显示名 | `Android Phone` |
+| `CF_PROTOCOL` | `quic` / `http2` | `quic` |
+
+> `A2A_PASS` 含 `# @ $ !` 等字符时**必须用单引号包起来**，否则会被 shell 截断。
 
 ### 管理命令
 
@@ -704,6 +714,7 @@ su -c 'mv /data/adb/service.d/*ipv6-forward* /data/adb/service.d/*dashboard* /da
 │   ├── 99-chroot-services.example.sh
 │   ├── 95-dashboard.example.sh
 │   ├── ddns-cloudflare.py          # AAAA 自动同步
+│   ├── droidvm.env.example         # 运行配置模板（凭据占位）
 │   └── dvm-dashboard.py            # 监控面板（单文件）
 └── scripts/
     └── deploy-check.sh             # 部署后自检脚本
