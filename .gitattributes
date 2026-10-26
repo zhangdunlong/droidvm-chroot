@@ -13,3 +13,6 @@
 *.jpg   binary
 *.qcow2 binary
 *.xz    binary
+
+# Magisk 安装器入口（无扩展名，需 LF 且可执行）
+update-binary text eol=lf

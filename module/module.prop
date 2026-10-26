@@ -1,0 +1,6 @@
+id=droidvm_chroot
+name=DroidVM Chroot
+version=v2.0.0
+versionCode=200
+author=zhangdunlong
+description=在 Root 安卓手机的 chroot 内原生跑 Linux 服务栈，不使用 QEMU / 任何指令模拟。含 agent2api、青龙、音箱桥、Caddy HTTPS、Cloudflare 隧道与监控面板。开机自启，mgmt.sh 管理。

@@ -1,0 +1,31 @@
+#!/sbin/sh
+#################
+# Magisk Module Installer
+#################
+
+umask 022
+
+OUTFD=$2
+ZIPFILE=$3
+
+mount /data 2>/dev/null
+
+# Magisk 20.4+ 的通用安装流程：
+# 屏蔽 Magisk 内置的模块安装逻辑，改为执行本模块自带的 customize.sh
+if [ -f /data/adb/magisk/util_functions.sh ]; then
+  . /data/adb/magisk/util_functions.sh
+  install_module
+  exit 0
+fi
+
+# KernelSU / APatch 兼容路径
+for K in /data/adb/ksu/bin/util_functions.sh /data/adb/ap/bin/util_functions.sh; do
+  if [ -f "$K" ]; then
+    . "$K"
+    install_module
+    exit 0
+  fi
+done
+
+echo "! 未找到 Magisk / KernelSU / APatch 的安装环境"
+exit 1

@@ -27,3 +27,7 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# 打包产物
+*.zip
+DroidVM-Chroot-*.zip

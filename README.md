@@ -544,6 +544,88 @@ Magisk 的 `/data/adb/service.d/` 会按文件名顺序执行目录下**所有**
 
 ---
 
+## 10.5 Magisk 模块形态（推荐）
+
+除了前面那种「往 `service.d` 丢脚本」的方式，本仓库还提供完整的 Magisk 模块：
+在面具里可启用 / 禁用 / 卸载，服务生命周期由模块统一管理。
+
+### 装什么、放哪里
+
+```
+module/
+├── module.prop                 # id=droidvm_chroot  version=v2.0.0
+├── customize.sh                # 刷入时：查架构/rootfs、移出旧 service.d 脚本、生成配置
+├── service.sh                  # 开机自启（后台子 shell，毫秒级返回，不阻塞 Magisk）
+├── uninstall.sh                # 卸载：停服务、保留数据
+├── bin/mgmt.sh                 # 管理命令
+├── scripts/boot.sh             # 启动总入口（挂载→IPv6→Caddy→gost→业务→面板→守护）
+└── META-INF/…                  # Magisk 安装器入口
+```
+
+运行期落在：
+
+| 路径 | 内容 |
+|---|---|
+| `/data/adb/modules/DroidVM-Chroot/` | 模块主体（随模块卸载消失） |
+| `/data/local/droidvm/` | 数据目录（rootfs + 服务数据，卸载保留） |
+| `/data/adb/droidvm.env` | 运行配置，权限 600，含明文凭据 |
+| `/data/local/tmp/droidvm-boot.log` | 启动日志 |
+
+### 配置（`/data/adb/droidvm.env`）
+
+```bash
+A2A_USER=admin
+A2A_PASS='<AI 网关管理员密码>'          # 留空则跳过该服务
+CF_API_TOKEN='<Cloudflare Token>'       # 证书 DNS-01 用，仅需 Zone.DNS.Edit
+HTTPS_PROXY='http://127.0.0.1:7890'     # 出站 443 被拦时填
+DASH_LINKS='青龙面板|https://ql.example.com|http://{ip4}:5700'
+DASH_DEVICE_NAME='Android Phone'
+```
+
+改完执行 `mgmt.sh restart`。
+
+### 管理命令
+
+```bash
+M=/data/adb/modules/DroidVM-Chroot/bin/mgmt.sh
+su -c "sh $M status"            # 端口/进程/IPv6/证书/隧道/资源 总览
+su -c "sh $M start"             # 启动（幂等，已在跑的跳过）
+su -c "sh $M stop"
+su -c "sh $M restart"
+su -c "sh $M log 60"            # 最近 60 行启动日志
+su -c "sh $M env"               # 查看配置（凭据值打码）
+su -c "sh $M restore-legacy"    # 还原安装时移出的 service.d 脚本
+su -c "sh $M purge"             # 删除 /data/local/droidvm（危险，需输入 DELETE）
+```
+
+### 打包与刷入
+
+```bash
+sh build-zip.sh
+# 产物 DroidVM-Chroot-v2.0.0.zip（8 个文件，脚本自动带可执行位）
+```
+
+Magisk → 模块 → 从本地安装 → 选 zip → 重启。
+
+> 打包脚本用 Python 的 `zipfile` 而非系统 `zip`：Windows 和 Linux 行为一致，
+> 且能显式写入 `update-binary` 等文件的可执行位（zip 里是 `external_attr`）。
+
+### ⚠️ 与 `service.d` 脚本不能共存
+
+Magisk 会执行 `/data/adb/service.d/` 下**所有文件，不看后缀**——
+改名成 `.bak` 照样会被执行，必须**移出目录**。
+
+`customize.sh` 会自动把 `50-ipv6-forward.sh` / `95-dashboard.sh` / `99-chroot-services.sh`
+移到 `/data/local/droidvm/legacy-service-d/`。如果你手工部署模块，这一步要自己做：
+
+```bash
+su -c 'mkdir -p /data/local/droidvm/legacy-service-d'
+su -c 'mv /data/adb/service.d/*ipv6-forward* /data/adb/service.d/*dashboard* /data/adb/service.d/*chroot-services* /data/local/droidvm/legacy-service-d/ 2>/dev/null'
+```
+
+否则会出现双份启动：两个脚本都会 `svc wifi disable/enable`（导致开机后短暂断网）、
+都会尝试起同一个服务（幂等但不干净）。
+
 ## 11. 性能实测
 
 同一套服务，两台手机对比：
