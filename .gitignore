@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 日志与运行时产物
+*.log
+dash.log
+caddy.out
+
+# 本地备份（脚本改动前的 .bak-YYYYMMDD）
+*.bak
+*.bak-*
+
+# 真实凭据：绝不入库
+*.env
+caddy.env
+*-tunnel.json
+credentials*.json
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,35 @@
+# ============================================================
+# Cloudflare Tunnel 配置（放置于 chroot 内 /etc/cloudflared/config.yml）
+#
+# 准备步骤：
+#   cloudflared tunnel login
+#   cloudflared tunnel create droidvm
+#   cloudflared tunnel route dns droidvm api.example.com
+#   cloudflared tunnel route dns droidvm dash.example.com
+#
+# 凭据文件 /etc/cloudflared/droidvm-tunnel.json 由 tunnel create 生成，
+# 权限务必 600，且不要提交到仓库。
+# ============================================================
+
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/droidvm-tunnel.json
+
+ingress:
+  # AI API 网关
+  - hostname: api.example.com
+    service: http://127.0.0.1:3065
+    originRequest:
+      keepAliveTimeout: 10s
+
+  # 监控面板
+  - hostname: dash.example.com
+    service: http://127.0.0.1:8765
+    originRequest:
+      keepAliveTimeout: 10s
+
+  # 预留占位：明确返回 404，避免落到兜底规则时暴露信息
+  - hostname: files.example.com
+    service: http_status:404
+
+  # 兜底规则（必须放在最后，且必须存在）
+  - service: http_status:404

@@ -1,0 +1,107 @@
+# ============================================================
+# Caddy 反代 + Let's Encrypt 自动证书（DNS-01 方式）
+#
+# 需要带 cloudflare DNS 插件的二进制：
+#   xcaddy build --with github.com/caddy-dns/cloudflare
+#
+# 启动前必须注入：
+#   CF_API_TOKEN   Cloudflare API Token（权限仅需 Zone.DNS.Edit）
+#   HTTPS_PROXY    （可选）出站 443 被运营商拦时用，如 http://127.0.0.1:7890
+#
+# 启动命令：
+#   chroot $R /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root \
+#     XDG_DATA_HOME=/var/lib/caddy XDG_CONFIG_HOME=/etc/caddy \
+#     CF_API_TOKEN="$CF_API_TOKEN" HTTPS_PROXY="$HTTPS_PROXY" \
+#     /bin/sh -c 'setsid nohup /usr/local/bin/caddy run \
+#       --config /etc/caddy/Caddyfile --adapter caddyfile \
+#       >> /var/log/caddy/caddy.out 2>&1 < /dev/null &'
+# ============================================================
+
+{
+	admin off
+
+	# 只走 TCP。手机 UDP:8080 常被占用，HTTP/3 起不来还会拖慢启动
+	servers {
+		protocols h1 h2
+	}
+}
+
+# ===== AI API 网关 =====
+https://ai.example.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+		ca https://acme-v02.api.letsencrypt.org/directory
+
+		# 关键：用公共 DNS 检查 TXT。
+		# 手机若开着代理软件，本地 DNS 会返回 fake-ip(198.18.x.x)，
+		# Caddy 会拿到假地址导致验证永远失败。
+		resolvers 8.8.8.8 1.1.1.1
+
+		# 给 TXT 记录一点传播时间，减少二次验证
+		propagation_delay 15s
+		propagation_timeout 180s
+	}
+
+	encode gzip
+	reverse_proxy 127.0.0.1:3065 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output file /var/log/caddy/ai.log {
+			roll_size 5mb
+			roll_keep 3
+		}
+		level INFO
+	}
+}
+
+# ===== 青龙面板 =====
+# 注意：青龙本质是远程命令执行，公网暴露务必配强密码 + 二次验证，
+#       或只允许固定 IP 访问（在下面加 @allowed remote_ip 白名单）
+https://ql.example.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+		ca https://acme-v02.api.letsencrypt.org/directory
+		resolvers 8.8.8.8 1.1.1.1
+		propagation_delay 15s
+		propagation_timeout 180s
+	}
+
+	encode gzip
+	reverse_proxy 127.0.0.1:5700 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output file /var/log/caddy/ql.log {
+			roll_size 5mb
+			roll_keep 3
+		}
+		level INFO
+	}
+}
+
+# ===== 旧入口兼容 / 排障用 =====
+https://v6.example.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+		ca https://acme-v02.api.letsencrypt.org/directory
+		resolvers 8.8.8.8 1.1.1.1
+		propagation_delay 15s
+		propagation_timeout 180s
+	}
+
+	encode gzip
+	reverse_proxy 127.0.0.1:3065 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output file /var/log/caddy/v6.log {
+			roll_size 5mb
+			roll_keep 3
+		}
+		level INFO
+	}
+}
