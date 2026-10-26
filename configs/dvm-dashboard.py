@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DVM 仪表盘 v2 —— Android chroot 原生版
+DVM 仪表盘 v2 —— 真我 RMX1971 / chroot 原生版
 
-与早期 QEMU 版本(v1)的区别：
+与 K40 时期的 v1 区别：
   · v1 跑在 QEMU 访客里，靠 host 写 battery.json、靠 cgroup 扫容器、靠 systemd 查服务
   · v2 直接跑在 Android 内核的 chroot 内：
       - 电量/温度 读 /sys/class/power_supply/battery 与 /sys/class/thermal
@@ -41,11 +41,40 @@ SERVICES = [
     ("gost", 8080, "TCP 转发"),
 ]
 
-# 隧道域名（按当前 cloudflared ingress 配置）
-TUNNEL_HOSTS = [
-    ("api.example.com", "agent2api"),
-    ("dash.example.com", "监控面板"),
-    ("files.example.com", "占位 404"),
+# 端口 → 人类可读服务名（用于隧道目标展示）
+# 注意：这里只做"名字翻译"，路由事实一律以 cloudflared 配置为准，
+#      不要在别处再硬编码域名表——那正是 2026-10-26 标签写错（dash 仍显示青龙）的根因。
+PORT_LABELS = {
+    3065: "agent2api",
+    5700: "青龙",
+    5500: "青龙·二实例",
+    36592: "mi-paiai",
+    443: "Caddy",
+    80: "Caddy",
+    8080: "gost",
+    7890: "Clash",
+    8765: "仪表盘",
+    20241: "cloudflared 指标",
+}
+
+# 快捷入口（{ip4} 会被替换成当前局域网 IP）
+#   pub = 公网入口，lan = 内网入口；前端按访问方式自动选
+#   v6=True 表示公网入口依赖 IPv6 直连（Caddy），本机无 IPv6 时前端会给出提示
+LINKS = [
+    {"name": "青龙面板", "pub": "https://ql.example.com",
+     "lan": "http://{ip4}:5700", "desc": "定时任务", "v6": True},
+    {"name": "青龙·二实例", "pub": "",
+     "lan": "http://{ip4}:5500", "desc": "备用面板", "v6": True},
+    {"name": "AI 网关", "pub": "https://ai.example.com",
+     "lan": "http://{ip4}:3065", "desc": "agent2api", "v6": True},
+    {"name": "本面板", "pub": "https://dash.example.com",
+     "lan": "http://{ip4}:8765", "desc": "当前页面", "v6": False},
+]
+
+# cloudflared 配置候选路径（按优先级，chroot 内绝对路径）
+TUNNEL_CONFIGS = [
+    "/etc/cloudflared/dvm-config.yml",
+    "/etc/cloudflared/config.yml",
 ]
 
 
@@ -279,13 +308,99 @@ def proc_running(keyword):
     return False
 
 
+def parse_ingress(path):
+    """极简 cloudflared ingress 解析（零依赖，不引 yaml）。
+
+    只关心 ingress 段内的 hostname / service 两个键，格式形如：
+        ingress:
+          - hostname: api.example.com
+            service: http://127.0.0.1:3065
+            originRequest: ...
+          - service: http_status:404      # 兜底
+    解析失败一律返回 []，由调用方降级提示，不抛异常。
+    """
+    out = []
+    cur = None
+    inside = False
+    try:
+        with open(path) as f:
+            for raw in f:
+                line = raw.split("#", 1)[0].rstrip()
+                if not line.strip():
+                    continue
+                s = line.strip()
+                if not inside:
+                    if s.startswith("ingress:"):
+                        inside = True
+                    continue
+                # ingress 段结束：回到顶层键
+                if not line[0].isspace() and not s.startswith("-"):
+                    break
+                if s.startswith("-"):
+                    if cur:
+                        out.append(cur)
+                    cur = {}
+                    s = s[1:].strip()
+                    if not s:
+                        continue
+                if cur is None:
+                    continue
+                k, _, v = s.partition(":")
+                k = k.strip()
+                if k in ("hostname", "service"):
+                    cur[k] = v.strip().strip('"').strip("'")
+        if cur:
+            out.append(cur)
+    except Exception:
+        return []
+    return out
+
+
+def describe_service(service):
+    """service 字符串 → (展示文本, 可用于探测的端口或 None)"""
+    if not service:
+        return "未知", None
+    if service.startswith("http_status:"):
+        return "占位 %s" % service.split(":", 1)[1], None
+    port = None
+    if "://" in service:          # http:// / https:// / tcp:// / ssh:// 等
+        tail = service.rsplit(":", 1)
+        if len(tail) == 2 and tail[1].strip().isdigit():
+            port = int(tail[1].strip())
+    if port is None:
+        return service, None
+    label = PORT_LABELS.get(port)
+    return ("%s · %d" % (label, port) if label else "127.0.0.1:%d" % port), port
+
+
 def collect_tunnel():
     running = proc_running("cloudflared")
     ok20241, _ = port_open(20241)
+
+    src = ""
+    entries = []
+    for p in TUNNEL_CONFIGS:
+        if os.path.exists(p):
+            src = p
+            entries = parse_ingress(p)
+            break
+
+    hosts = []
+    for item in entries:
+        host = item.get("hostname", "").strip()
+        if not host:          # 兜底规则无 hostname，不展示
+            continue
+        target, port = describe_service(item.get("service", ""))
+        up = None
+        if port is not None:
+            up, _ = port_open(port)
+        hosts.append({"host": host, "target": target, "port": port, "up": up})
+
     return {
         "running": running,
         "metrics_port": ok20241,
-        "hosts": [{"host": h, "target": t} for h, t in TUNNEL_HOSTS],
+        "config": src,
+        "hosts": hosts,
     }
 
 
@@ -328,7 +443,41 @@ def collect_uptime():
     return {"seconds": up, "text": txt}
 
 
+def collect_links(net):
+    """快捷入口。环境变量 DASH_LINKS，格式：
+
+        名称|公网URL|内网URL        三段（推荐，前端按访问来源自动选）
+        名称|URL                   两段（公网内网同一个地址）
+
+    多条目用 ; 分隔。URL 里可用 {ip4} 占位当前局域网 IP。例：
+      DASH_LINKS="青龙面板|https://ql.example.com|http://{ip4}:5700;AI 网关|https://ai.example.com"
+
+    留空则整卡隐藏（开源版默认不带真实地址）。
+    仅做地址拼装，不做跨域探测（浏览器会拦，后端探测又会拖慢刷新）。
+    """
+    ip4 = (net or {}).get("ipv4") or "127.0.0.1"
+    raw = (os.environ.get("DASH_LINKS") or "").strip()
+    out = []
+    if not raw:
+        return out
+    for item in raw.split(";"):
+        item = item.strip()
+        if not item or "|" not in item:
+            continue
+        parts = [x.strip() for x in item.split("|")]
+        name = parts[0]
+        pub = parts[1] if len(parts) > 1 else ""
+        lan = parts[2] if len(parts) > 2 else pub
+        pub = pub.replace("{ip4}", ip4)
+        lan = lan.replace("{ip4}", ip4)
+        if not name or not (pub or lan):
+            continue
+        out.append({"name": name, "pub": pub, "lan": lan or pub, "desc": ""})
+    return out
+
+
 def snapshot():
+    net = collect_net()
     return {
         "ts": time.time(),
         "ts_text": time.strftime("%m-%d %H:%M:%S"),
@@ -340,7 +489,8 @@ def snapshot():
         "temp": collect_temp(),
         "services": collect_services(),
         "tunnel": collect_tunnel(),
-        "net": collect_net(),
+        "net": net,
+        "links": collect_links(net),
         "uptime": collect_uptime(),
         "dash_uptime": time.time() - START_TS,
     }
@@ -388,7 +538,10 @@ PAGE = r"""<!DOCTYPE html>
      background:linear-gradient(92deg,#c084fc,#f472b6);-webkit-background-clip:text;background-clip:text;color:transparent}
   .sub{font-size:11.5px;color:var(--dim);text-align:right;line-height:1.6}
   .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  /* min-width:0 必须加：grid 的 1fr 最小值是 min-content，
+     不加会让「温度」卡片的三个 nowrap 指标撑破列宽，窄屏整页横向溢出 */
   .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 15px;
+        min-width:0;
         backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
   .wide{grid-column:1/-1}
   .k{font-size:11.5px;color:var(--dim);letter-spacing:.5px;margin-bottom:7px}
@@ -409,17 +562,31 @@ PAGE = r"""<!DOCTYPE html>
   .dot{width:8px;height:8px;border-radius:99px;flex:0 0 auto;margin-right:9px}
   .dot.on{background:var(--ok);box-shadow:0 0 9px rgba(52,211,153,.85)}
   .dot.off{background:var(--bad);box-shadow:0 0 9px rgba(248,113,113,.6)}
-  .svc .nm{flex:1}
+  .svc .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .svc .pt{color:var(--dim);font-size:11.5px;font-variant-numeric:tabular-nums}
   .svc .ms{color:var(--ok);font-size:11px;min-width:40px;text-align:right}
   .svc .ms.bad{color:var(--bad)}
   .host{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:6px 0;
-        border-bottom:1px solid rgba(255,255,255,.05);color:var(--dim)}
+        border-bottom:1px solid rgba(255,255,255,.05);color:var(--dim);min-width:0}
   .host:last-child{border-bottom:none}
+  .host>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .host>b{flex:0 1 auto;min-width:0;text-align:right;white-space:nowrap;
+          overflow:hidden;text-overflow:ellipsis}
   .host b{color:#c9cde0;font-weight:500;font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
   .tag{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:99px;margin-left:6px;
        background:rgba(52,211,153,.14);color:var(--ok);border:1px solid rgba(52,211,153,.28)}
   .tag.off{background:rgba(248,113,113,.13);color:var(--bad);border-color:rgba(248,113,113,.3)}
+  /* 快捷入口 */
+  .lnk{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;
+       border-bottom:1px solid rgba(255,255,255,.05);font-size:13.5px;
+       color:var(--txt);text-decoration:none;min-width:0}
+  .lnk:last-child{border-bottom:none}
+  .lnk:active{opacity:.6}
+  .lnk>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lnk .u{color:var(--dim);font-size:11px;font-weight:400}
+  .lnk .go{flex:0 0 auto;font-size:11.5px;color:var(--pur);white-space:nowrap}
+  .lnk.dim{opacity:.5}
+  .lnk.dim .go{color:var(--warn)}
   footer{margin-top:16px;text-align:center;font-size:11px;color:var(--dim);line-height:1.7}
   @media(max-width:430px){.v{font-size:22px}.card{padding:12px 13px}}
 </style>
@@ -431,6 +598,11 @@ PAGE = r"""<!DOCTYPE html>
 </header>
 
 <div class="grid">
+  <div class="card wide">
+    <div class="k">快捷入口</div>
+    <div id="links"></div>
+  </div>
+
   <div class="card wide">
     <div class="k">电池</div>
     <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
@@ -515,6 +687,7 @@ async function tick(){
     $('uptime').textContent=d.uptime.text;
     $('ts').textContent=d.ts_text;
 
+
     const b=d.battery;
     $('batt').textContent=b.capacity>=0?b.capacity:'—';
     $('batt-status').textContent=b.status_cn||'—';
@@ -558,12 +731,35 @@ async function tick(){
        <span class="pt">${s.port}</span>
        <span class="ms ${s.up?'':'bad'}">${s.up?(s.ms+'ms'):'down'}</span></div>`).join('');
 
+    // 快捷入口：内网打开走内网地址，公网打开走公网域名
+    const isLan=/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+    const v6ok=!!(d.net&&d.net.ipv6);
+    $('links').innerHTML=(d.links||[]).map(l=>{
+      const url=isLan?(l.lan||l.pub):(l.pub||l.lan);
+      const needV6=!isLan&&l.v6&&!v6ok&&l.pub;      // 公网入口依赖 IPv6，本机暂无
+      const scope=isLan?'内网':(l.pub?'公网':'内网');
+      const tip=needV6?'公网需 IPv6，当前未获取':(l.desc||'');
+      const tipHtml = tip ? `<span class="u"> · ${tip}</span>` : '';
+      return `<a class="lnk${needV6?' dim':''}" href="${url}" target="_blank" rel="noopener">
+        <span>${l.name}${tipHtml}</span>
+        <span class="go">${needV6?'仅内网':scope} ↗</span></a>`;
+    }).join('');
+
     const tu=d.tunnel;
     $('tunnel-tag').textContent=tu.running?'运行中':'未运行';
     $('tunnel-tag').className='tag'+(tu.running?'':' off');
-    $('tunnel-proc').textContent=tu.running?'running':'stopped';
-    $('hosts').innerHTML=tu.hosts.map(h=>
-      `<div class="host"><span>${h.host}</span><b>→ ${h.target}</b></div>`).join('');
+    $('tunnel-proc').textContent=tu.running?('running'+(tu.config?(' · '+tu.config.split('/').pop()):'')):'stopped';
+    if(!tu.hosts.length){
+      $('hosts').innerHTML=`<div class="host"><span>未解析到域名路由</span><b>${tu.config||'未找到 cloudflared 配置'}</b></div>`;
+    }else{
+      $('hosts').innerHTML=tu.hosts.map(h=>{
+        const dot=h.up===true
+          ?'<span class="dot on" style="display:inline-block;margin-right:7px;vertical-align:middle"></span>'
+          :h.up===false
+          ?'<span class="dot off" style="display:inline-block;margin-right:7px;vertical-align:middle"></span>':'';
+        return `<div class="host"><span>${dot}${h.host}</span><b>→ ${h.target}</b></div>`;
+      }).join('');
+    }
   }catch(e){ $('ts').textContent='请求失败：'+e.message; }
 }
 tick(); setInterval(tick,3000);

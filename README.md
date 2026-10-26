@@ -467,6 +467,20 @@ chroot "$R" /usr/bin/env -i \
 | 服务状态 | TCP 连接探测 `127.0.0.1:<port>` |
 | 隧道状态 | 扫 `/proc/*/cmdline` 找 `cloudflared` |
 
+### 快捷入口（面板顶部的跳转链接）
+
+面板顶部会列出常用服务的直达链接，由环境变量 `DASH_LINKS` 配置：
+
+```bash
+DASH_LINKS="青龙面板|https://ql.example.com|http://{ip4}:5700;AI 网关|https://ai.example.com|http://{ip4}:3065"
+```
+
+- 格式：`名称|公网URL|内网URL`，多条目用 `;` 分隔
+- 两段写法 `名称|URL` 表示内外网同一个地址
+- `{ip4}` 会被替换成当前局域网 IP
+- 前端会按访问来源自动选择：内网打开走内网地址，公网打开走公网域名
+- 留空则整张卡片隐藏
+
 ### 三个必须知道的数据陷阱
 
 1. **`thermal_zone` 里混着非温度节点**
