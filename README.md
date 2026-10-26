@@ -1,6 +1,8 @@
 # DroidVM Lite · 在 Root 安卓手机上原生运行 Linux 服务栈
 
 > **v2.0 — 去掉软件模拟，改 chroot 原生运行**
+>
+> 📦 直接下载 Magisk 模块：**[DroidVM-Chroot-v2.0.0.zip](https://github.com/zhangdunlong/droidvm-chroot/releases/latest)**（刷入即用，也可只用 `configs/` 里的 service.d 脚本）
 > 同一台手机、同一套服务，CPU 占用从 196% 降到个位数，温度从 78.7°C 降到 32.5°C。
 
 这个项目把一台闲置的 Root 安卓手机变成常驻小服务器：跑青龙面板、AI API 网关、音箱桥接、监控面板，
