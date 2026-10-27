@@ -670,6 +670,7 @@ su -c 'mv /data/adb/service.d/*ipv6-forward* /data/adb/service.d/*dashboard* /da
 | 面板电量显示 5/3 mAh | `charge_now` 单位不可靠 | 只用 `charge_full_design` |
 | 面板小字挤在一起 | 浏览器不支持 flex `gap` | 改 margin |
 | 从 v1 升级后磁盘少 2.3G | 旧 qcow2 还在 `/data/local/droidvm/vm/` | 确认不再需要后删除 |
+| **给域名加橙云 A 记录后，AAAA 也失效了** | Cloudflare 的橙云是**域名级**生效：同域下只要有任一条 `proxied=true`，CF 就会接管该域名的**全部**解析，AAAA 也被替换成 CF 边缘 IP | 走 IPv6 直连的域名**只保留 AAAA 且必须灰云**。要做 IPv4 兜底请**另开一个域名**走隧道，不要在同一个域名上加橙云 A |
 
 ---
 
