@@ -14,6 +14,7 @@
 #   6) IPv6 守护（常驻自愈）
 # ============================================================
 
+MODDIR=/data/adb/modules/DroidVM-Chroot
 R=/data/local/droidvm/rootfs
 LOG=/data/local/tmp/droidvm-boot.log
 ENVF=/data/adb/droidvm.env        # 可选：CF_API_TOKEN / DASH_LINKS 等
@@ -148,6 +149,18 @@ if ! netstat -tln 2>/dev/null | grep -q ":36592 "; then
       AUTH_SECRET="$(cat "$S/auth_secret" 2>/dev/null | tr -d '\n')" \
       /bin/sh -c 'cd /opt/mi-paiai && setsid nohup /usr/local/bin/node apps/web/dist/index.js >> /opt/mi-paiai/mp.log 2>&1 < /dev/null &'
     echo "[+] 36592 启动"
+
+    # node 进程起来只是 web 服务在监听，/api/status 仍是 stopped，
+    # 必须显式 /api/start 才会连小米云并开始接收音箱消息。
+    # 不调用的话：面板显示在线，但对着音箱说话毫无反应。
+    if [ -f "$MODDIR/scripts/mp-autostart.py" ]; then
+      cp "$MODDIR/scripts/mp-autostart.py" "$R/tmp/mp-autostart.py" 2>/dev/null
+      sleep 6
+      chroot "$R" /usr/bin/env -i PATH=/usr/bin:/bin \
+        MP_USER="$(cat "$S/auth_username" 2>/dev/null)" \
+        MP_PASS="$(cat "$S/auth_password" 2>/dev/null)" \
+        python3 /tmp/mp-autostart.py 2>&1 | sed 's/^/    /'
+    fi
   fi
 fi
 
