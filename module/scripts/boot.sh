@@ -69,15 +69,22 @@ if ! ip -6 rule 2>/dev/null | grep -qE "^50:[[:space:]]"; then
   echo "[+] ipv6 rule added"
 fi
 
+# 取地址时必须优先 stable-privacy：wlan0 上通常同时有两个全局地址，
+# temporary 是短期轮换的（head -1 常拿到它），而 DNS 里登记的、入站能连上的
+# 是带 mngtmpaddr 标记的 stable-privacy 地址。日志里显示错的那个会误导排查。
 i=0
 V6=""
 while [ $i -lt 24 ]; do
-  V6=$(ip -6 addr show wlan0 2>/dev/null | grep "scope global" \
+  V6=$(ip -6 addr show wlan0 2>/dev/null | grep "scope global" | grep "stable-privacy" \
         | grep -oE "inet6 [0-9a-f:]+" | awk '{print $2}' | grep -v "^fe80" | head -1)
+  if [ -z "$V6" ]; then
+    V6=$(ip -6 addr show wlan0 2>/dev/null | grep "scope global" \
+          | grep -oE "inet6 [0-9a-f:]+" | awk '{print $2}' | grep -v "^fe80" | head -1)
+  fi
   [ -n "$V6" ] && break
   sleep 5; i=$((i+1))
 done
-echo "[+] ipv6 = ${V6:-未获取}"
+echo "[+] ipv6 = ${V6:-未获取} (stable-privacy 优先)"
 
 # ---------- 4) Caddy ----------
 CF_API_TOKEN=""; HTTPS_PROXY=""; HTTP_PROXY=""; NO_PROXY=""
