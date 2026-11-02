@@ -5,10 +5,32 @@
 #   cloudflared tunnel login
 #   cloudflared tunnel create droidvm
 #   cloudflared tunnel route dns droidvm api.example.com
-#   cloudflared tunnel route dns droidvm dash.example.com
+#   cloudflared tunnel route dns droidvm dash4.example.com
 #
 # 凭据文件 /etc/cloudflared/droidvm-tunnel.json 由 tunnel create 生成，
 # 权限务必 600，且不要提交到仓库。
+#
+# ────────────────────────────────────────────────────────────
+# 为什么「IPv4 兜底」必须用独立子域（2026-11-02 实测）
+# ────────────────────────────────────────────────────────────
+# 场景：设备只有公网 IPv6，同一服务的 IPv6 直连域名是灰云 AAAA 记录。
+#       需求是让「只有 IPv4 的网络」也能访问该服务。
+#
+# Cloudflare 的硬约束：同一个 hostname 下，CNAME 与 A/AAAA 互斥。
+#   给已有 AAAA 的 hostname 再加 CNAME → 报错 81053
+#   "An A, AAAA, or CNAME record with that host already exists"
+#   CNAME 本身也不能与 A/AAAA 共存（DNS 规范同样禁止）。
+#
+# 所以「让同一个域名既保留 IPv6 直连、又支持 IPv4」在 Cloudflare 上做不到。
+# 唯一可行解：IPv4 入口另开一个子域（如 dash4），走隧道 CNAME。
+#
+# 补充：把 AAAA 改成橙云（proxied=true）同样不行。
+#   若 zone 的 SSL 模式为 flexible，边缘回源走 HTTP，Caddy 会返回 308
+#   跳 HTTPS → 客户端重定向回 HTTPS → 死循环（实测 http=308）。
+#   要走橙云代理 IPv6 源站，需先把 SSL 模式改为 full/full(strict)，
+#   并给源站装 Cloud Origin CA 证书，链路比隧道重得多，不推荐。
+#
+# 结论：IPv6 直连用灰云 AAAA（快，0.1-0.3s），IPv4 兜底用隧道子域。
 # ============================================================
 
 tunnel: <TUNNEL_UUID>
@@ -21,8 +43,16 @@ ingress:
     originRequest:
       keepAliveTimeout: 10s
 
-  # 监控面板
+  # 监控面板（与 IPv6 直连同名域并存，保留以便内网/排障切换）
   - hostname: dash.example.com
+    service: http://127.0.0.1:8765
+    originRequest:
+      keepAliveTimeout: 10s
+
+  # 监控面板的纯 IPv4 兜底入口：
+  # DNS 侧建 CNAME dash4.example.com → <TUNNEL_UUID>.cfargotunnel.com (proxied=true)
+  # 边缘会同时返回 A + AAAA 双栈 anycast 地址，IPv4-only 网络可直接访问。
+  - hostname: dash4.example.com
     service: http://127.0.0.1:8765
     originRequest:
       keepAliveTimeout: 10s

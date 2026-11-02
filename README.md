@@ -206,7 +206,14 @@ chroot $R /usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 |---|---|---|
 | `api.example.com` | `127.0.0.1:3065` | AI API（给不支持 IPv6 的客户端） |
 | `dash.example.com` | `127.0.0.1:8765` | 监控面板（电量/CPU/服务/隧道） |
+| `dash4.example.com` | `127.0.0.1:8765` | 监控面板的纯 IPv4 兜底入口 |
 | `files.example.com` | `http_status:404` | 预留占位 |
+
+> **为什么 IPv4 兜底要另开子域？** Cloudflare 同名主机下 CNAME 与 A/AAAA 互斥（报错 81053），
+> 所以「同一个域名既保留 IPv6 直连、又支持 IPv4」做不到。IPv4 入口必须用独立子域，
+> 且 DNS 侧建 `CNAME dash4.example.com → <TUNNEL_UUID>.cfargotunnel.com`（橙云），
+> 边缘会同时返回 A + AAAA 双栈 anycast 地址，IPv4-only 网络即可访问。
+> 详见 [§7](#7-cloudflare-tunnel-穿透纯-ipv4-环境的兜底) 与 FAQ。
 
 ### 5.3 局域网直连（最快，毫秒级）
 
@@ -671,6 +678,9 @@ su -c 'mv /data/adb/service.d/*ipv6-forward* /data/adb/service.d/*dashboard* /da
 | 面板小字挤在一起 | 浏览器不支持 flex `gap` | 改 margin |
 | 从 v1 升级后磁盘少 2.3G | 旧 qcow2 还在 `/data/local/droidvm/vm/` | 确认不再需要后删除 |
 | **给域名加橙云 A 记录后，AAAA 也失效了** | Cloudflare 的橙云是**域名级**生效：同域下只要有任一条 `proxied=true`，CF 就会接管该域名的**全部**解析，AAAA 也被替换成 CF 边缘 IP | 走 IPv6 直连的域名**只保留 AAAA 且必须灰云**。要做 IPv4 兜底请**另开一个域名**走隧道，不要在同一个域名上加橙云 A |
+| **给已有 AAAA 的域名加 CNAME → 报 81053** | Cloudflare 同名主机下 CNAME 与 A/AAAA **互斥**（DNS 规范本身也禁止 CNAME 与其他类型共存）：`An A, AAAA, or CNAME record with that host already exists` | 同一个域名**不可能**既保留 IPv6 直连又挂隧道 CNAME。IPv4 兜底必须用**独立子域**（如 `dash4.example.com`），并在该子域的 tunnel ingress 里加同名规则 |
+| **橙云代理 IPv6 源站时一直 308 跳转** | zone 的 SSL 模式是 `flexible`，边缘回源走 HTTP，Caddy 返回 308 跳 HTTPS → 客户端重定向回 HTTPS → 死循环 | 别用橙云代理 IPv6 源站。要走这条路得先把 SSL 模式改成 `full`/`full(strict)` 并给源站装 Cloud Origin CA 证书；IPv4 兜底仍以**隧道子域**最省事 |
+| **面板上的公网入口在纯 IPv4 网络打不开** | 面板「快捷入口」默认指向 IPv6 直连域名（灰云 AAAA），IPv4-only 网络解析不到 A 记录 | `DASH_LINKS` 里把公网地址换成**隧道子域**（双栈 anycast），或用第四段 `v6` 标记声明该入口依赖 IPv6，前端会自动置灰提示 |
 
 ---
 

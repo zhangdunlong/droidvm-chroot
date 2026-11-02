@@ -448,10 +448,12 @@ def collect_links(net):
 
         名称|公网URL|内网URL        三段（推荐，前端按访问来源自动选）
         名称|URL                   两段（公网内网同一个地址）
+        名称|公网URL|内网URL|v6    四段（末段 v6 标记公网入口依赖 IPv6 直连）
 
     多条目用 ; 分隔。URL 里可用 {ip4} 占位当前局域网 IP。例：
       DASH_LINKS="青龙面板|https://ql.example.com|http://{ip4}:5700;AI 网关|https://ai.example.com"
 
+    内网URL留空时，公网入口不会被局域网访问替换（用于「仅公网可用」的入口）。
     留空则整卡隐藏（开源版默认不带真实地址）。
     仅做地址拼装，不做跨域探测（浏览器会拦，后端探测又会拖慢刷新）。
     """
@@ -467,12 +469,13 @@ def collect_links(net):
         parts = [x.strip() for x in item.split("|")]
         name = parts[0]
         pub = parts[1] if len(parts) > 1 else ""
-        lan = parts[2] if len(parts) > 2 else pub
+        lan = parts[2] if len(parts) > 2 else ""
+        v6 = parts[3].lower() == "v6" if len(parts) > 3 else False
         pub = pub.replace("{ip4}", ip4)
         lan = lan.replace("{ip4}", ip4)
         if not name or not (pub or lan):
             continue
-        out.append({"name": name, "pub": pub, "lan": lan or pub, "desc": ""})
+        out.append({"name": name, "pub": pub, "lan": lan, "desc": "", "v6": v6})
     return out
 
 
